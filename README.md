@@ -1,268 +1,196 @@
-# 🎬 VIBENT - Entertainment Chatbot
+# VIBENT
 
-**An AI-powered conversational chatbot for personalized entertainment, event booking, trip planning, and mood-based experience generation.**
+VIBENT is a conversational movie recommendation chatbot. You describe what you feel like watching in plain English, for example *"sci-fi movies released after 2015"*, *"I'm bored, suggest something interesting"*, or *"movies like Inception"*. VIBENT turns that into a structured search, fetches real results from [TMDB](https://www.themoviedb.org/), and replies in a chat with movie cards.
 
-## Features
+## Features (MVP)
 
-### 1. Suggest Something 🎯
-- Get personalized recommendations for:
-  - 🎬 Movies (via TMDB API)
-  - 📚 Books
-  - 🎮 Games
-  - 🍕 Food & Dining
-  - And more!
-- Filter by genre, rating, year, and preferences
-- AI-powered suggestions based on mood
+- **Chat interface.** A dark, responsive chat UI with message bubbles, suggested prompts, a typing indicator, error messages with retry, and a "New chat" reset. It works on desktop and mobile.
+- **Natural-language interpretation.** The interpreter picks out genres, moods, years or year ranges ("after 2015", "90s", "between 2000 and 2010"), rating preferences ("highly rated", "rated above 7"), popularity, title searches, and "movies like *X*".
+  - **Rule-based by default.** Keyword and regex matching in [`src/services/intent.service.js`](src/services/intent.service.js). This is not an AI model.
+  - **Optional OpenAI.** If `OPENAI_API_KEY` is set, OpenAI converts the message into the same structured filters. Its output is validated, and VIBENT falls back to the rules if the call fails. The model only picks search parameters; every movie shown comes from TMDB.
+  - Each reply shows which interpreter was used ("Parsed by rules" or "Parsed by OpenAI") and the filters it applied.
+- **TMDB integration.** Covers discovery by genre, year, rating and sort; title search; recommendations for a given title; and movie details. It uses request timeouts, safe error messages, and a 10-minute in-memory response cache.
+- **Recommendation cards.** Each card shows the poster, title, year, rating, a short overview, and a link to the TMDB page. Clicking a card opens a details dialog with runtime, tagline and genres.
+- **Follow-ups.** "Show me more" pages through further results for the previous request. Conversation history lives in the browser tab only.
+- **Demo mode.** Without a TMDB key, VIBENT serves a small set of fictional sample titles so the UI can be tried. Demo mode is clearly labelled in the header, in a banner, and on every reply. It is never presented as TMDB data.
 
-### 2. Book an Event 🎪
-- Browse and book:
-  - 🎬 Movies
-  - 🎤 Talk Shows
-  - 🎵 Concerts
-  - Local Events
-- Location-based search for nearby events
-- Eventbrite & Ticketmaster integration
-- One-click booking and calendar add
+## Architecture
 
-### 3. Weekend Trip Planner ✈️
-- Plan weekend getaways in seconds
-- Input: City, Budget, Theme (Nature/Adventure/Food/Cultural/etc)
-- Get:
-  - 2-3 nearby destinations
-  - Estimated travel time & costs
-  - 3-5 curated activities
-  - AI-generated itineraries
-- Save and share trips
+```mermaid
+flowchart LR
+  UI["Browser<br/>public/index.html + js/app.js"] -- "POST /api/chat<br/>GET /api/movies/:id" --> API["Express app<br/>src/app.js"]
+  API --> V["validators.js<br/>input validation"]
+  API --> C["chat.controller.js"]
+  C --> R["recommendation.service.js<br/>interpret → query → reply"]
+  R --> I1["intent.service.js<br/>rule-based"]
+  R -. "if OPENAI_API_KEY" .-> I2["openai.service.js"]
+  R --> T["tmdb.service.js"] --> TMDB[("TMDB API")]
+  R -. "if no TMDB key" .-> D["demo-catalog.js<br/>fictional samples"]
+  API --> E["error.middleware.js<br/>safe JSON errors"]
+```
 
-### 4. Plan My Day 📅
-- Discover local events by interest:
-  - 🎵 Music
-  - 💻 Tech
-  - 😂 Stand-up Comedy
-  - 🎨 Art & Exhibitions
-  - 📚 Workshops
-- AI "What to Wear" suggestions
-- Summarized event vibes
-- One-click booking
+1. The frontend sends `{ "message": "...", "context": <paging context or null> }` to `POST /api/chat`.
+2. The message is validated: a non-empty string of at most 500 characters.
+3. The recommender interprets the message into filters, using OpenAI if configured and rules otherwise.
+4. The catalog (TMDB, or demo data when no key is set) is queried with those filters.
+5. The reply text is built from templates using the filters and the movies actually returned, so the bot never describes movies it didn't retrieve.
 
-### 5. Entertainment Genie ✨ (Unique Feature)
-**The Magic Feature** - Ask vague questions, get creative micro-experiences!
-- "I'm feeling chill"
-- "Need an adventure"
-- "Bored at home"
+Example response:
 
-Genie returns:
-- Curated micro-experience description
-- Spotify playlist suggestions
-- At-home activity recommendations
-- Optional nearby event suggestion
+```json
+{
+  "success": true,
+  "message": "Here are some sci-fi movies released 2016 or later you might enjoy.",
+  "movies": [
+    {
+      "id": 123,
+      "title": "Example Movie",
+      "overview": "Movie description",
+      "release_date": "2020-01-01",
+      "rating": 8.2,
+      "vote_count": 5400,
+      "poster_path": "/example.jpg",
+      "poster_url": "https://image.tmdb.org/t/p/w342/example.jpg",
+      "genres": ["Science Fiction"],
+      "tmdb_url": "https://www.themoviedb.org/movie/123"
+    }
+  ],
+  "interpretation": { "kind": "discover", "genres": ["Science Fiction"], "year_from": 2016, "sort_by": "popularity.desc" },
+  "interpreter": "rules",
+  "source": "tmdb",
+  "next": { "filters": { "...": "..." }, "page": 1, "offset": 8 },
+  "suggestions": []
+}
+```
 
-## Tech Stack
+Errors use `{ "success": false, "error": { "code": "...", "message": "..." } }` with an appropriate status code:
 
-### Backend
-- **Node.js** + Express.js
-- **AI/LLM Integration** for mood interpretation & content generation
-- **OAuth 2.0** for secure third-party integrations
+| Code | Status | Meaning |
+|---|---|---|
+| `EMPTY_MESSAGE` | 400 | Message was empty or whitespace only |
+| `INVALID_REQUEST` | 400 | Body or context was malformed |
+| `INVALID_JSON` | 400 | Body was not valid JSON |
+| `TMDB_AUTH_FAILED` | 502 | TMDB rejected the API key |
+| `TMDB_UNAVAILABLE` | 502 | TMDB returned an error or couldn't be reached |
+| `TMDB_RATE_LIMITED` | 503 | TMDB is rate-limiting requests |
+| `TMDB_TIMEOUT` | 504 | TMDB took too long to respond |
+| `RATE_LIMITED` | 429 | More than 60 API requests per minute from one client |
 
-### API Integrations (3+ Plugs)
-1. **TMDB Movies API** - Movie recommendations & details
-2. **Eventbrite API** - Event discovery & booking
-3. **Amadeus Travel API** - Trip planning & destinations
-4. **Spotify API** - Playlist generation
+API keys, stack traces and upstream error bodies are never sent to the client.
 
-### Database
-- Session Management & User Preferences
-- OAuth Token Storage (secure)
-- Conversation History
+### API endpoints
 
-### UI/UX
-- Rich message formatting with emojis
-- Carousel cards for browsing
-- Action buttons (Book, Save, Share, View More)
-- Mobile-responsive design
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/chat` | Chat message → reply plus movies |
+| `GET` | `/api/movies/:id` | Movie details (runtime, tagline, genres) |
+| `GET` | `/api/health` | `{ status, source: "tmdb" \| "demo", interpreter: "rules" \| "openai" }` |
 
-## Security Features
+## Tech stack
 
-✅ OAuth 2.0 authentication for all integrations  
-✅ Secure token management with refresh strategy  
-✅ Rate limiting & request throttling  
-✅ Input validation & sanitization  
-✅ HTTPS-only communication  
-✅ Session timeout (30 min idle)  
+- **Backend:** Node.js (≥ 20) and Express 5, using `helmet` (security headers and CSP), `express-rate-limit`, and `dotenv`. Outbound HTTP uses Node's built-in `fetch` with `AbortSignal.timeout`.
+- **Frontend:** plain HTML, CSS and JavaScript served by Express. No build step.
+- **Data:** TMDB API v3.
+- **Optional:** OpenAI Chat Completions API for message interpretation.
+- **Tests:** Jest and Supertest, with all external HTTP mocked.
 
-## Installation & Setup
+## Project structure
+
+```
+src/
+  index.js                      Entry point: loads .env, validates config, starts the server
+  app.js                        Express app factory (middleware, routes, static files)
+  config.js                     Environment variable parsing and validation
+  routes/chat.routes.js         /api/chat and /api/movies/:id
+  controllers/chat.controller.js
+  services/
+    recommendation.service.js   Orchestrates interpret → fetch → reply
+    intent.service.js           Rule-based message interpretation
+    openai.service.js           Optional OpenAI interpretation
+    tmdb.service.js             TMDB client (discover, search, recommendations, details, cache)
+    demo-catalog.js             Fictional sample data for demo mode
+    genres.js                   TMDB genre IDs
+  middleware/error.middleware.js
+  utils/                        validators, errors, logger
+public/
+  index.html, css/styles.css, js/app.js, favicon.svg
+tests/
+  chat.test.js, tmdb.test.js, intent.test.js, openai.test.js, helpers.js
+```
+
+## Getting started
+
+### Prerequisites
+
+- Node.js 20 or newer (tested on Node 26) and npm
+- A free TMDB account for live data. Without one, VIBENT runs in demo mode.
+
+### Get a TMDB API key
+
+1. Create an account at [themoviedb.org](https://www.themoviedb.org/signup) and verify your email.
+2. Go to **Settings → API** ([themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)) and request an API key (developer / personal use).
+3. Copy either the **API Key** (v3) or the **API Read Access Token** (v4). VIBENT accepts both and detects which one you provided.
+
+### Install and configure
 
 ```bash
-# Clone the repository
-git clone https://github.com/Itzzdarshan/Vibent.git
-cd Vibent
-
-# Install dependencies
 npm install
+```
 
-# Setup environment variables
+```bash
 cp .env.example .env
-# Edit .env with your API keys and OAuth credentials
+```
 
-# Start the bot
+Then edit `.env` and set `TMDB_API_KEY=<your key>`. `OPENAI_API_KEY` is optional.
+
+### Run
+
+```bash
 npm start
 ```
 
-## Environment Variables
+Open http://localhost:3000. The header shows **Live TMDB** when a key is configured, or **Demo data** otherwise. For auto-restart on file changes, use `npm run dev` (`node --watch`).
 
-```env
-# API Keys
-TMDB_API_KEY=your_tmdb_key
-EVENTBRITE_API_KEY=your_eventbrite_key
-AMADEUS_API_KEY=your_amadeus_key
-SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_secret
+### Test
 
-# OAuth
-OAUTH_REDIRECT_URI=http://localhost:3000/auth/callback
-SESSION_SECRET=your_secret_key
-
-# AI/LLM
-OPENAI_API_KEY=your_openai_key  # For GPT-based features
-
-# Database
-DB_URL=your_database_url
-DB_NAME=vibent_db
+```bash
+npm test
 ```
 
-## Project Structure
+For a coverage report:
 
-```
-Vibent/
-├── src/
-│   ├── index.js                 # Entry point
-│   ├── config/
-│   │   ├── bot-config.js       # Bot settings
-│   │   └── oauth-config.js     # OAuth setup
-│   ├── core/
-│   │   ├── conversation-engine.js   # Main bot logic
-│   │   ├── intent-classifier.js     # NLP intent detection
-│   │   ├── session-manager.js       # Session handling
-│   │   └── state-manager.js         # Conversation state
-│   ├── plugs/
-│   │   ├── tmdb-plug.js        # Movies integration
-│   │   ├── eventbrite-plug.js  # Events integration
-│   │   ├── amadeus-plug.js     # Travel integration
-│   │   └── spotify-plug.js     # Playlists integration
-│   ├── auth/
-│   │   ├── oauth-handler.js    # OAuth flows
-│   │   ├── token-manager.js    # Token handling
-│   │   └── permissions.js      # Permission scopes
-│   ├── features/
-│   │   ├── suggest-something.js     # Feature 1
-│   │   ├── book-event.js            # Feature 2
-│   │   ├── weekend-trip-planner.js  # Feature 3
-│   │   ├── event-planner.js         # Feature 4
-│   │   └── entertainment-genie.js   # Feature 5 (Unique)
-│   ├── ai/
-│   │   ├── llm-handler.js          # LLM integration
-│   │   ├── mood-interpreter.js     # Mood analysis
-│   │   ├── prompt-templates.js     # AI prompts
-│   │   └── content-generator.js    # Content creation
-│   ├── ui/
-│   │   ├── message-formatter.js    # Message formatting
-│   │   ├── carousel-builder.js     # Carousel cards
-│   │   ├── button-renderer.js      # Button components
-│   │   └── card-component.js       # Card templates
-│   ├── utils/
-│   │   ├── error-handler.js        # Error management
-│   │   ├── retry-logic.js          # Retry mechanism
-│   │   ├── logger.js               # Logging
-│   │   └── validators.js           # Input validation
-│   └── middleware/
-│       ├── rate-limiter.js         # Rate limiting
-│       ├── error-middleware.js     # Error handling
-│       └── auth-middleware.js      # Auth verification
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   ├── oauth-tests.js
-│   └── flow-tests.js
-├── docs/
-│   ├── API_DOCUMENTATION.md
-│   ├── OAUTH_GUIDE.md
-│   ├── BOT_FLOWS.md
-│   └── DEPLOYMENT_GUIDE.md
-├── deployment/
-│   ├── docker-compose.yml
-│   └── salesiq-deploy.md
-├── .env.example
-├── .gitignore
-├── package.json
-└── README.md
+```bash
+npm run test:coverage
 ```
 
-## API Flow Diagrams
+The tests cover valid chat requests, empty and invalid input, malformed JSON, TMDB success, failures (5xx, 401, 429, timeout, network, bad JSON) and empty results, paging and caching, demo mode, the details endpoint, the OpenAI interpreter and its fallback, and intent extraction. All TMDB and OpenAI calls are mocked, so no network access or keys are needed.
 
-### Suggest Something Flow
-```
-User Input → Intent Classifier → Feature Router → Preference Collection
-→ API Plug (TMDB/Others) → AI Formatter → Carousel Response → User Selection
-```
+## Environment variables
 
-### Entertainment Genie Flow
-```
-Vague Query → Mood Interpreter (AI) → Context Analysis
-→ Micro-Experience Generator → Spotify API → Event API
-→ Combined Response (Experience + Playlist + Activity + Event)
-```
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PORT` | no | `3000` | HTTP port |
+| `TMDB_API_KEY` | recommended | none | TMDB v3 API key or v4 read token. Empty means demo mode. |
+| `OPENAI_API_KEY` | no | none | Enables OpenAI interpretation |
+| `OPENAI_MODEL` | no | `gpt-4o-mini` | Model used when OpenAI is enabled |
+| `TMDB_TIMEOUT_MS` | no | `8000` | TMDB request timeout |
+| `OPENAI_TIMEOUT_MS` | no | `10000` | OpenAI request timeout |
+| `TRUST_PROXY` | no | `false` | Set `true` behind a reverse proxy |
 
-### OAuth Flow
-```
-User → Bot → OAuth Provider → Auth Code → Token Exchange
-→ Access Token + Refresh Token → Secure Storage → API Requests
-```
+## Known limitations
 
-## Error Handling & Resilience
+- **Movies only.** Requests for books, games, music, events or travel are politely declined.
+- **Simple rule-based parsing.** The default interpreter is keyword matching. It handles common phrasings but not complex or negated requests ("anything but horror"). The rules also don't resolve follow-ups like "older ones" against the previous request; only "show me more" is understood. Setting `OPENAI_API_KEY` helps with phrasing, but follow-ups still work the same way.
+- **No persistence.** Conversation history lives in the browser tab and is lost on reload. There are no user accounts or saved preferences.
+- **Single process.** The response cache and rate limiter are in memory, per server process.
+- **English only.** Queries and TMDB results use `en-US`.
+- **OpenAI path tested with mocks only.** It hasn't been run against the live OpenAI API. The default model name may need updating in `OPENAI_MODEL`.
+- **Outdated docs.** `IMPLEMENTATION.md`, `PROJECT_STATUS.md` and `ZOHO_CLIQTRIX_SUBMISSION.md` describe an earlier, unimplemented design (Eventbrite, Amadeus, Spotify, OAuth, SalesIQ) and do not reflect this codebase.
 
-- Exponential backoff retry (3 attempts max)
-- Graceful API failure degradation
-- Rate limit handling
-- 5-second timeout per API call
-- User-friendly error messages
-- Comprehensive logging & monitoring
+## Attribution
 
-## Performance Metrics
-
-- **Response Time**: < 1 second (avg)
-- **API Latency**: < 500ms per plug
-- **Uptime SLA**: 99.9%
-- **Concurrent Users**: Scalable
-- **Session Memory**: 30 min idle timeout
-
-## Roadmap
-
-- [ ] Multi-language support
-- [ ] User preference learning
-- [ ] Social features (share recommendations)
-- [ ] Payment integration for direct ticket booking
-- [ ] Voice chat interface
-- [ ] Mobile app
-- [ ] Analytics dashboard
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repo
-2. Create a feature branch
-3. Add tests
-4. Submit a pull request
+Movie data and images are provided by [TMDB](https://www.themoviedb.org/). This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 ## License
 
-MIT License - see LICENSE.md
-
-## Support
-
-- 📧 Email: support@vibent.dev
-- 🐛 Issues: GitHub Issues
-- 💬 Discussions: GitHub Discussions
-
----
-
-**Made with ❤️ for entertainment lovers everywhere**
+MIT. See [LICENSE](LICENSE).

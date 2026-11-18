@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="VIBENT is a chatbot that recommends movies from natural-language requests.">
+  <title>VIBENT · Movie Chat</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="/js/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo-mark" aria-hidden="true">V</span>
+        <div>
+          <h1 class="brand-name">VIBENT</h1>
+          <p class="brand-tag">Movie picks, conversationally</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="status" id="status" aria-live="polite"></div>
+        <button type="button" class="ghost-btn" id="new-chat" hidden>New chat</button>
+      </div>
+    </header>
+
+    <div class="banner" id="demo-banner" role="note" hidden>
+      <strong>Demo mode.</strong> No TMDB API key is configured, so results are fictional sample titles, not real TMDB data.
+    </div>
+
+    <main class="chat" id="chat">
+      <section class="empty" id="empty">
+        <h2>What are you in the mood for?</h2>
+        <p>Ask for a genre, a mood, a year range, or a movie you loved, and I'll find something to watch.</p>
+        <div class="prompt-grid">
+          <button type="button" class="prompt" data-prompt="Recommend a thriller">Recommend a thriller</button>
+          <button type="button" class="prompt" data-prompt="Something funny">Something funny</button>
+          <button type="button" class="prompt" data-prompt="Best sci-fi movies">Best sci-fi movies</button>
+          <button type="button" class="prompt" data-prompt="Highly rated action movies">Highly rated action movies</button>
+        </div>
+      </section>
+      <ol class="messages" id="messages" aria-live="polite" aria-label="Conversation"></ol>
+    </main>
+
+    <form class="composer" id="composer" novalidate>
+      <div class="composer-box">
+        <label for="input" class="sr-only">Message VIBENT</label>
+        <textarea id="input" rows="1" maxlength="500" placeholder="Ask for a movie… e.g. sci-fi after 2015" autocomplete="off"></textarea>
+        <button type="submit" class="send-btn" id="send" aria-label="Send message">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.4 20.4 21 12 3.4 3.6l-.01 6.53L15 12 3.39 13.87z" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <p class="composer-hint" id="composer-hint" aria-live="assertive"></p>
+    </form>
+
+    <footer class="attribution">
+      Movie data from <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">TMDB</a>.
+      This product uses the TMDB API but is not endorsed or certified by TMDB.
+    </footer>
+  </div>
+
+  <dialog class="details" id="details" aria-labelledby="details-title">
+    <button type="button" class="details-close" id="details-close" aria-label="Close details">×</button>
+    <div class="details-content" id="details-content"></div>
+  </dialog>
+</body>
+</html>
